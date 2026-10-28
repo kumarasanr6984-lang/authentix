@@ -58,8 +58,66 @@ export function findApplicationsByQuery(query: string): StudentApplication[] {
   );
 }
 
+export function isDemoFormApplication(app: StudentApplication): boolean {
+  if (app.isDemo || app.isDemoApplication) return true;
+  // Heuristic matching demo applicant details (preserving pre-seeded sample records like EVA-2026-0001)
+  if (
+    app.id !== 'EVA-2026-0001' &&
+    app.personal &&
+    app.personal.fullName === 'Karthik Ramanathan' &&
+    (app.personal.email === 'karthik.ramanathan@example.com' ||
+      app.certificates?.aadhaarNumber?.replace(/\D/g, '') === '984522109812' ||
+      app.tenth?.registerNumber === 'TN-SSLC-489201')
+  ) {
+    return true;
+  }
+  return false;
+}
+
+export function deleteApplication(id: string): boolean {
+  try {
+    const apps = getStoredApplications();
+    const cleanId = id.trim().toUpperCase();
+    const filtered = apps.filter((a) => a.id.trim().toUpperCase() !== cleanId);
+    if (filtered.length !== apps.length) {
+      saveStoredApplications(filtered);
+      return true;
+    }
+  } catch (err) {
+    console.error('Error deleting application:', err);
+  }
+  return false;
+}
+
 export function saveNewApplication(app: StudentApplication): void {
-  const apps = getStoredApplications();
+  let apps = getStoredApplications();
+
+  // If the demo form is applied, check if the demo form was already applied previously.
+  // If applied a second (or subsequent) time, delete the application(s) applied the first time.
+  if (isDemoFormApplication(app)) {
+    const previousDemoApps = apps.filter(
+      (existing) => isDemoFormApplication(existing) && existing.id !== app.id
+    );
+
+    if (previousDemoApps.length > 0) {
+      const prevIds = previousDemoApps.map((a) => a.id);
+      apps = apps.filter((existing) => !prevIds.includes(existing.id));
+      console.log(
+        `[Authentix Storage] Demo form applied second time: Deleted application(s) first time applied (${prevIds.join(', ')}).`
+      );
+
+      if (app.auditTrail) {
+        app.auditTrail.unshift({
+          id: `aud-${Date.now()}-demo-cleanup`,
+          timestamp: new Date().toISOString(),
+          actor: 'Authentix Lifecycle Engine',
+          action: 'Previous Demo Application Deleted',
+          details: `Demo form applied second time. Deleted application applied the first time: ${prevIds.join(', ')}.`,
+        });
+      }
+    }
+  }
+
   const existingIdx = apps.findIndex((a) => a.id === app.id);
   if (existingIdx >= 0) {
     apps[existingIdx] = app;

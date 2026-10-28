@@ -517,10 +517,14 @@ export function runDocumentVerificationPipeline(
   for (const other of existingApplications) {
     if (other.id === app.id) continue;
 
-    // Skip checking against pre-seeded sample records during candidate demo workflow
+    // Skip checking against pre-seeded sample records or previous demo submissions during candidate demo workflow
+    const isAppDemo = app.isDemo || app.isDemoApplication || (app.personal.fullName === 'Karthik Ramanathan' && app.id !== 'EVA-2026-0001');
+    const isOtherDemo = other.isDemo || other.isDemoApplication || (other.personal.fullName === 'Karthik Ramanathan' && other.id !== 'EVA-2026-0001');
+
     if (
       (other.id === 'EVA-2026-0001' && app.personal.fullName === 'Karthik Ramanathan') ||
-      (other.personal.fullName === app.personal.fullName && other.collegeCode === app.collegeCode)
+      (other.personal.fullName === app.personal.fullName && other.collegeCode === app.collegeCode) ||
+      (isAppDemo && (isOtherDemo || other.id === 'EVA-2026-0001'))
     ) {
       continue;
     }

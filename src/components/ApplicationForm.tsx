@@ -230,6 +230,8 @@ export const ApplicationForm: React.FC<ApplicationFormProps> = ({
   const handleAutoFillDemoApplication = (proceedDirectly = false) => {
     const demoApp: StudentApplication = {
       ...app,
+      isDemo: true,
+      isDemoApplication: true,
       collegeCode: college.code,
       collegeName: college.name,
       personal: {

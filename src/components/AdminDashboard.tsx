@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import jsPDF from 'jspdf';
 import {
   Users,
@@ -146,6 +146,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setApplications(getStoredApplications());
     setDepartments(getCollegeDepartments(college.code));
   };
+
+  useEffect(() => {
+    refreshAppData();
+    const handleStorageChange = () => {
+      refreshAppData();
+    };
+    window.addEventListener('storage', handleStorageChange);
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+    };
+  }, [college.code]);
 
   // Administrative Actions
   const handleApprove = (app: StudentApplication) => {

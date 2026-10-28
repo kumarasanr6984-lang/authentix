@@ -206,6 +206,8 @@ export interface StudentApplication {
   reviewNotes?: string;
   correctionRequest?: CorrectionRequest;
   auditTrail: AuditLogEntry[];
+  isDemo?: boolean;
+  isDemoApplication?: boolean;
 }
 
 export interface CollegeDepartment {

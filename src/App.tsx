@@ -27,6 +27,7 @@ import {
   getVisitedColleges,
   saveCollegeDraft,
   getCollegeDraft,
+  clearCollegeDraft,
   getLastVisitedCollegeCode,
   createBlankApplication,
 } from './services/storage';
@@ -224,6 +225,9 @@ export default function App() {
     };
 
     saveNewApplication(finalApp);
+    if (finalApp.collegeCode) {
+      clearCollegeDraft(finalApp.collegeCode);
+    }
     setCurrentApplication(finalApp);
     handleNavigate('submission-success');
   };

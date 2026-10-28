@@ -27,7 +27,7 @@ export const DEMO_COLLEGES: CollegeInfo[] = [
     district: 'Coimbatore',
     state: 'Tamil Nadu',
     logoText: 'AIT',
-    bannerImage: '/src/assets/images/campus_asteria_tech_1792929580664.jpg',
+    bannerImage: '/assets/images/campus_asteria_tech_1792929580664.jpg',
     tagline: 'Engineering the Next Paradigm with Research & Industry 4.0',
     description:
       'Asteria Institute of Technology is an autonomous, premier engineering institute located in Coimbatore, recognized for excellence in robotics, artificial intelligence, and sustainable engineering architectures. With high-throughput research laboratories and stellar university rankings, AIT prepares next-generation engineering visionaries.',
@@ -209,7 +209,7 @@ export const DEMO_COLLEGES: CollegeInfo[] = [
     district: 'Chennai',
     state: 'Tamil Nadu',
     logoText: 'BCE',
-    bannerImage: '/src/assets/images/campus_bluecrest_engineering_1792929581021.jpg',
+    bannerImage: '/assets/images/campus_bluecrest_engineering_1792929581021.jpg',
     tagline: 'Leading Coastal Innovation, Autonomous Systems & Computing Prowess',
     description:
       'Bluecrest College of Engineering is a high-ranking technical institution positioned in Chennai’s IT Corridor. Renowned for modern computing infrastructure, multidisciplinary research hubs, and deep industry partnerships with multinational tech giants, Bluecrest guarantees cutting-edge professional readiness.',

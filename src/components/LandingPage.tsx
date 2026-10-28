@@ -116,7 +116,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             <div className="lg:col-span-5 relative">
               <div className="relative rounded-2xl overflow-hidden shadow-2xl border border-slate-200 bg-slate-900 group">
                 <img
-                  src="/src/assets/images/hero_authentix_admissions_1792929580725.jpg"
+                  src="/assets/images/hero_authentix_admissions_1792929580725.jpg"
                   alt="Authentix Engineering Admissions Campus"
                   className="w-full h-80 lg:h-96 object-cover opacity-90 group-hover:scale-105 transition-transform duration-700"
                   referrerPolicy="no-referrer"

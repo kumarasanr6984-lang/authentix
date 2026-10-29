@@ -812,64 +812,175 @@ export function runNameVerificationTestCases(): {
 }
 
 /**
- * Intelligent Document Name Extractor
- * Reads candidate name from:
- * 1. Explicit extractedName property
- * 2. Structured mockDataPayload
- * 3. File naming heuristics (e.g. "Aadhaar_Gowtham_Raj.pdf" -> "Gowtham Raj")
- * 4. Fallback default if specified
+ * Common institutional keywords or headers that should NEVER be mistaken for a student name.
+ */
+const INSTITUTIONAL_HEADERS_BLOCKLIST = [
+  'government of tamil nadu',
+  'directorate of government examinations',
+  'board of higher secondary education',
+  'secondary school leaving certificate',
+  'higher secondary course certificate',
+  'statement of marks',
+  'transfer certificate',
+  'community certificate',
+  'income certificate',
+  'birth certificate',
+  'permanent record',
+  'tamil nadu state board',
+  'central board of secondary education',
+  'council for the indian school certificate',
+  'unique identification authority of india',
+  'government of india',
+  'candidate name',
+  'student name',
+  'pupil name',
+  'date of birth',
+  'register number',
+  'roll number',
+  'serial number',
+  'marksheet number',
+];
+
+function cleanExtractedCandidateName(raw: string): string {
+  let val = raw.trim();
+  // Strip common honorifics / salutations
+  val = val.replace(/^(?:Selvan|Selvi|Thiru|Tmt|Mr|Ms|Mrs|Master|Kumari|Shri|Smt)\.?\s+/i, '');
+  // Strip trailing punctuation and delimiters
+  val = val.replace(/[,;:\-\.\/]+$/, '').trim();
+  // Collapse whitespace
+  val = val.replace(/\s+/g, ' ');
+  return val;
+}
+
+function isValidCandidateName(name: string): boolean {
+  if (!name || name.length < 2 || name.length > 60) return false;
+  // Must have alphabetic characters
+  if (!/[a-zA-Z]/.test(name)) return false;
+  // Cannot be digits or punctuation only
+  if (/^[\d\s\-_:\.\/]+$/.test(name)) return false;
+  const lower = name.toLowerCase().trim();
+  for (const header of INSTITUTIONAL_HEADERS_BLOCKLIST) {
+    if (lower === header || lower.startsWith(header + ' ') || lower.endsWith(' ' + header)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Extracts candidate name strictly from inside document text / OCR tokens (never from filename).
+ */
+export function extractCandidateNameFromText(text: string | null | undefined, _docType?: string): string | null {
+  if (!text || !text.trim()) return null;
+
+  // 1. Structured OCR token streams (e.g. TOKEN_NAME: "Karthik Ramanathan")
+  const tokenMatch = text.match(/TOKEN_(?:NAME|STUDENTNAME|CHILDNAME|CANDIDATENAME):\s*["']([^"'\n\r]+)["']/i);
+  if (tokenMatch && tokenMatch[1]) {
+    const cleaned = cleanExtractedCandidateName(tokenMatch[1]);
+    if (isValidCandidateName(cleaned)) return cleaned;
+  }
+
+  // 2. Explicit labeled name patterns:
+  // "Candidate Name: Karthik Ramanathan"
+  // "Student Name : R. Karthik"
+  // "Name of the Candidate / Pupil: Karthik Ramanathan"
+  const labeledPatterns = [
+    /(?:Name\s+of\s+(?:the\s+)?(?:Candidate|Student|Pupil|Applicant)|Candidate\s+Name|Student(?:\x27s)?\s+Name|Pupil(?:\x27s)?\s+Name)\s*[:\-]\s*([A-Za-z\s\.\'\-]+?)(?=\s+(?:Register|Reg|Roll|DOB|Date|Total|Father|Mother|Son|Daughter|S\/o|D\/o|Standard|Class|\n|\r|$))/i,
+    /(?:^|\n|\r)\s*(?:Candidate|Student|Pupil)?\s*Name\s*[:\-]\s*([A-Za-z\s\.\'\-]+?)(?=\s+(?:Register|Reg|Roll|DOB|Date|Total|Father|Mother|Son|Daughter|S\/o|D\/o|\n|\r|$))/i,
+  ];
+
+  for (const pattern of labeledPatterns) {
+    const m = text.match(pattern);
+    if (m && m[1]) {
+      const cleaned = cleanExtractedCandidateName(m[1]);
+      if (isValidCandidateName(cleaned)) return cleaned;
+    }
+  }
+
+  // 3. Certify that statement pattern (e.g. Transfer, Community, or Income certificate):
+  // "This is to certify that Selvan / Selvi / Mr / Ms [Candidate Name] son of / daughter of..."
+  const certifyMatch = text.match(
+    /(?:This\s+is\s+to\s+certify\s+that|Certify\s+that)\s+(?:Selvan|Selvi|Thiru|Tmt|Mr|Ms|Kumari|Master)?\.?\s*([A-Za-z\s\.\'\-]+?)(?=\s+(?:son\s+of|daughter\s+of|S\/o|D\/o|has\s+passed|is\s+a\s+student|residing|belongs|\n|\r|,))/i
+  );
+  if (certifyMatch && certifyMatch[1]) {
+    const cleaned = cleanExtractedCandidateName(certifyMatch[1]);
+    if (isValidCandidateName(cleaned)) return cleaned;
+  }
+
+  // 4. Aadhaar card layout pattern:
+  // In official Aadhaar UIDAI cards, the applicant name is printed immediately above the line containing DOB / Date of Birth
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/(?:DOB|Date of Birth|Year of Birth)\s*[:\-]/i.test(line)) {
+      if (i > 0) {
+        const prevLine = lines[i - 1];
+        const cleaned = cleanExtractedCandidateName(prevLine);
+        if (isValidCandidateName(cleaned)) return cleaned;
+      }
+    }
+  }
+
+  // 5. Line starting with "Name : <Value>"
+  for (const line of lines) {
+    const simpleMatch = line.match(/^Name\s*[:\-]\s*([A-Za-z\s\.\'\-]+)$/i);
+    if (simpleMatch && simpleMatch[1]) {
+      const cleaned = cleanExtractedCandidateName(simpleMatch[1]);
+      if (isValidCandidateName(cleaned)) return cleaned;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Intelligent In-Document Name Extractor
+ * Reads candidate name strictly from within the document:
+ * 1. Explicit extractedName property (derived from document content)
+ * 2. In-document OCR extracted text stream (via regex & NLP entity parsing)
+ * 3. Structured payload from the scanning engine
+ *
+ * NOTE: Filename extraction is deliberately NOT performed here.
+ * The verification engine strictly verifies names printed INSIDE the document content.
  */
 export function extractDocumentName(
-  doc: { name?: string; mockDataPayload?: Record<string, string | number>; extractedName?: string } | null | undefined,
-  fallbackCandidateName?: string
+  doc: {
+    name?: string;
+    mockDataPayload?: Record<string, string | number>;
+    extractedName?: string;
+    ocrExtractedText?: string;
+  } | null | undefined
 ): { extractedName: string | null; quality: 'HIGH' | 'MEDIUM' | 'LOW' | 'UNREADABLE' } {
   if (!doc) {
     return { extractedName: null, quality: 'UNREADABLE' };
   }
 
-  // 1. Explicitly recorded OCR extracted name
+  // 1. Explicitly recorded in-document OCR extracted name
   if (doc.extractedName && doc.extractedName.trim()) {
     return { extractedName: doc.extractedName.trim(), quality: 'HIGH' };
   }
 
-  // 2. Structured Payload from scanning engine
+  // 2. In-Document OCR Text Stream parsing
+  if (doc.ocrExtractedText && doc.ocrExtractedText.trim()) {
+    const textName = extractCandidateNameFromText(doc.ocrExtractedText);
+    if (textName && textName.trim()) {
+      return { extractedName: textName.trim(), quality: 'HIGH' };
+    }
+  }
+
+  // 3. Structured Payload from scanning engine
   if (doc.mockDataPayload) {
     const pName =
       (doc.mockDataPayload.name as string) ||
       (doc.mockDataPayload.studentName as string) ||
-      (doc.mockDataPayload.candidateName as string);
+      (doc.mockDataPayload.candidateName as string) ||
+      (doc.mockDataPayload.childName as string);
     if (pName && pName.trim()) {
       return { extractedName: pName.trim(), quality: 'HIGH' };
     }
   }
 
-  // 3. Document Filename OCR Heuristics
-  // Extracts candidate names embedded into filenames such as:
-  // "Aadhaar_Gowtham_Raj.pdf", "Kumar_R_HSC_Marksheet.png", "Arun_Kumer_10th.pdf"
-  if (doc.name) {
-    const withoutExt = doc.name.replace(/\.[a-zA-Z0-9]+$/, '');
-    // If the name explicitly signals corrupted or degraded scan:
-    if (/corrupt|degraded|blur|unreadable/i.test(withoutExt)) {
-      return { extractedName: null, quality: 'UNREADABLE' };
-    }
-
-    let candidateName = withoutExt
-      .replace(/^(aadhaar|adhaar|aadhar|adhar|sslc|hsc|10th|12th|tc|marksheet|mark_sheet|certificate|cert|id|doc|scan|photo|passport)[\s_-]*/gi, '')
-      .replace(/[\s_-]*(aadhaar|adhaar|aadhar|adhar|sslc|hsc|10th|12th|tc|marksheet|mark_sheet|certificate|cert|id|doc|scan|photo|passport)$/gi, '')
-      .replace(/[_-]+/g, ' ')
-      .trim();
-
-    // If filename had candidate tokens:
-    if (candidateName && candidateName.length >= 3 && !/^\d+$/.test(candidateName)) {
-      return { extractedName: candidateName, quality: 'MEDIUM' };
-    }
-  }
-
-  // 4. Fallback if candidate data is available
-  if (fallbackCandidateName && fallbackCandidateName.trim()) {
-    return { extractedName: fallbackCandidateName.trim(), quality: 'LOW' };
-  }
-
+  // No candidate name found inside document content
   return { extractedName: null, quality: 'UNREADABLE' };
 }
 

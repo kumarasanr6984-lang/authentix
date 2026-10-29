@@ -269,14 +269,17 @@ export const DocumentUpload: React.FC<DocumentUploadProps> = ({
 
     if (isUnreadable) {
       if (sampleDocs.aadhaarCard) {
-        sampleDocs.aadhaarCard.name = 'Corrupted_Unreadable_Aadhaar.pdf';
+        sampleDocs.aadhaarCard.name = 'Aadhaar_Document_Scan.pdf';
         sampleDocs.aadhaarCard.extractedName = '';
+        sampleDocs.aadhaarCard.ocrExtractedText = '=== SCANNER ===\nImage degraded / unreadable / no printed text detected.';
         if (sampleDocs.aadhaarCard.mockDataPayload) {
           delete sampleDocs.aadhaarCard.mockDataPayload.name;
         }
       }
       if (sampleDocs.tenthMarksheet) {
+        sampleDocs.tenthMarksheet.name = '10th_Standard_SSLC_Marksheet.pdf';
         sampleDocs.tenthMarksheet.extractedName = '';
+        sampleDocs.tenthMarksheet.ocrExtractedText = '=== SCANNER ===\nImage degraded / unreadable / no printed text detected.';
         if (sampleDocs.tenthMarksheet.mockDataPayload) {
           delete sampleDocs.tenthMarksheet.mockDataPayload.studentName;
         }
@@ -284,14 +287,16 @@ export const DocumentUpload: React.FC<DocumentUploadProps> = ({
     } else {
       if (sampleDocs.aadhaarCard) {
         sampleDocs.aadhaarCard.extractedName = docName;
-        sampleDocs.aadhaarCard.name = `Aadhaar_${docName.replace(/\s+/g, '_')}.pdf`;
+        sampleDocs.aadhaarCard.name = 'Aadhaar_Document_Scan.pdf';
+        sampleDocs.aadhaarCard.ocrExtractedText = `=== OCR TOKEN STREAM [AADHAARCARD] ===\nCandidate Name: ${docName}\nTOKEN_NAME: "${docName}"`;
         if (sampleDocs.aadhaarCard.mockDataPayload) {
           sampleDocs.aadhaarCard.mockDataPayload.name = docName;
         }
       }
       if (sampleDocs.tenthMarksheet) {
         sampleDocs.tenthMarksheet.extractedName = docName;
-        sampleDocs.tenthMarksheet.name = `10th_Marksheet_${docName.replace(/\s+/g, '_')}.pdf`;
+        sampleDocs.tenthMarksheet.name = '10th_Standard_SSLC_Marksheet.pdf';
+        sampleDocs.tenthMarksheet.ocrExtractedText = `=== OCR TOKEN STREAM [TENTHMARKSHEET] ===\nStudent Name: ${docName}\nTOKEN_STUDENTNAME: "${docName}"`;
         if (sampleDocs.tenthMarksheet.mockDataPayload) {
           sampleDocs.tenthMarksheet.mockDataPayload.studentName = docName;
         }
@@ -321,6 +326,9 @@ export const DocumentUpload: React.FC<DocumentUploadProps> = ({
         name: trimmed,
         studentName: trimmed,
       },
+      ocrExtractedText: trimmed
+        ? `=== IN-DOCUMENT OCR TEXT STREAM [${key.toUpperCase()}] ===\nCandidate Name: ${trimmed}\nTOKEN_NAME: "${trimmed}"\nTOKEN_STUDENTNAME: "${trimmed}"`
+        : '=== IN-DOCUMENT OCR TEXT STREAM ===\n[No candidate name detected in document content]',
     };
     const updated = { ...docs, [key]: updatedDoc };
     setDocs(updated);
@@ -536,9 +544,14 @@ export const DocumentUpload: React.FC<DocumentUploadProps> = ({
                       {/* OCR Extracted Candidate Name Row with Inline Edit */}
                       <div className="pt-2 border-t border-emerald-200/60 dark:border-emerald-800/60 space-y-1">
                         <div className="flex items-center justify-between text-[11px]">
-                          <span className="text-slate-600 dark:text-slate-300 font-semibold flex items-center gap-1">
-                            <span>Extracted Document Name (OCR):</span>
-                          </span>
+                          <div>
+                            <span className="text-slate-600 dark:text-slate-300 font-semibold flex items-center gap-1">
+                              <span>Extracted Candidate Name:</span>
+                            </span>
+                            <span className="text-[10px] text-slate-400 dark:text-slate-500 block">
+                              Scanned from document text content (not filename)
+                            </span>
+                          </div>
                           {editingDocKey === slot.key ? (
                             <div className="flex items-center gap-1">
                               <button
@@ -587,7 +600,7 @@ export const DocumentUpload: React.FC<DocumentUploadProps> = ({
                               autoFocus
                             />
                             <span className="text-[10px] text-slate-400 block mt-0.5">
-                              Leave empty to test &apos;Unable to Verify&apos; result.
+                              Leave empty to simulate unreadable / no name detected.
                             </span>
                           </div>
                         ) : (
@@ -596,7 +609,7 @@ export const DocumentUpload: React.FC<DocumentUploadProps> = ({
                               {uploaded.extractedName ||
                                 (uploaded.mockDataPayload?.name as string) ||
                                 (uploaded.mockDataPayload?.studentName as string) ||
-                                '— [Unreadable / Text Occluded]'}
+                                '— [No name detected inside document]'}
                             </span>
                             {!(
                               uploaded.extractedName ||
@@ -604,7 +617,7 @@ export const DocumentUpload: React.FC<DocumentUploadProps> = ({
                               uploaded.mockDataPayload?.studentName
                             ) && (
                               <span className="text-[10px] text-amber-700 dark:text-amber-400 font-bold">
-                                OCR Incomplete
+                                Incomplete / Unreadable
                               </span>
                             )}
                           </div>

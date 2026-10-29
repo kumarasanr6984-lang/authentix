@@ -60,101 +60,101 @@ export const OcrDocumentInspectorModal: React.FC<OcrDocumentInspectorModalProps>
         key: 'name',
         label: 'Candidate Name',
         formValue: application.personal.fullName || '',
-        extractedValue: String(payload.name || doc.extractedName || application.personal.fullName || ''),
+        extractedValue: String(payload.name || doc.extractedName || ''),
       });
       generatedFields.push({
         key: 'dob',
         label: 'Date of Birth (YYYY-MM-DD)',
         formValue: application.personal.dob || '',
-        extractedValue: String(payload.dob || application.personal.dob || ''),
+        extractedValue: String(payload.dob || ''),
       });
       generatedFields.push({
         key: 'aadhaarNumber',
         label: 'Aadhaar UID Number',
         formValue: application.certificates.aadhaarNumber || '',
-        extractedValue: String(payload.aadhaarNumber || application.certificates.aadhaarNumber || ''),
+        extractedValue: String(payload.aadhaarNumber || ''),
       });
     } else if (docKey === 'tenthMarksheet') {
       generatedFields.push({
         key: 'studentName',
         label: 'Candidate Name',
         formValue: application.personal.fullName || '',
-        extractedValue: String(payload.studentName || doc.extractedName || application.personal.fullName || ''),
+        extractedValue: String(payload.studentName || doc.extractedName || ''),
       });
       generatedFields.push({
         key: 'registerNumber',
         label: '10th Board Register Number',
         formValue: application.tenth.registerNumber || '',
-        extractedValue: String(payload.registerNumber || application.tenth.registerNumber || ''),
+        extractedValue: String(payload.registerNumber || ''),
       });
       generatedFields.push({
         key: 'schoolName',
         label: 'School Institution Name',
         formValue: application.tenth.schoolName || '',
-        extractedValue: String(payload.schoolName || application.tenth.schoolName || ''),
+        extractedValue: String(payload.schoolName || ''),
       });
       generatedFields.push({
         key: 'totalMarks',
         label: 'Total Marks (Out of 500)',
         formValue: String(application.tenth.totalMarks || ''),
-        extractedValue: String(payload.totalMarks || application.tenth.totalMarks || ''),
+        extractedValue: String(payload.totalMarks ?? ''),
       });
     } else if (docKey === 'twelfthMarksheet') {
       generatedFields.push({
         key: 'studentName',
         label: 'Candidate Name',
         formValue: application.personal.fullName || '',
-        extractedValue: String(payload.studentName || doc.extractedName || application.personal.fullName || ''),
+        extractedValue: String(payload.studentName || doc.extractedName || ''),
       });
       generatedFields.push({
         key: 'registerNumber',
         label: '12th HSC Register Number',
         formValue: application.twelfth.registerNumber || '',
-        extractedValue: String(payload.registerNumber || application.twelfth.registerNumber || ''),
+        extractedValue: String(payload.registerNumber || ''),
       });
       generatedFields.push({
         key: 'mathsMarks',
         label: 'Mathematics Marks (Max 100)',
         formValue: String(application.twelfth.mathsMarks || ''),
-        extractedValue: String(payload.mathsMarks ?? application.twelfth.mathsMarks ?? ''),
+        extractedValue: String(payload.mathsMarks ?? ''),
       });
       generatedFields.push({
         key: 'physicsMarks',
         label: 'Physics Marks (Max 100)',
         formValue: String(application.twelfth.physicsMarks || ''),
-        extractedValue: String(payload.physicsMarks ?? application.twelfth.physicsMarks ?? ''),
+        extractedValue: String(payload.physicsMarks ?? ''),
       });
       generatedFields.push({
         key: 'chemistryMarks',
         label: 'Chemistry Marks (Max 100)',
         formValue: String(application.twelfth.chemistryMarks || ''),
-        extractedValue: String(payload.chemistryMarks ?? application.twelfth.chemistryMarks ?? ''),
+        extractedValue: String(payload.chemistryMarks ?? ''),
       });
     } else if (docKey === 'communityCert') {
       generatedFields.push({
         key: 'category',
         label: 'Community Category',
         formValue: application.specialCategory.community || '',
-        extractedValue: String(payload.category || application.specialCategory.community || ''),
+        extractedValue: String(payload.category || ''),
       });
       generatedFields.push({
         key: 'certNumber',
         label: 'Certificate Reference Number',
         formValue: application.certificates.communityCertNumber || '',
-        extractedValue: String(payload.certNumber || application.certificates.communityCertNumber || ''),
+        extractedValue: String(payload.certNumber || ''),
       });
     } else if (docKey === 'incomeCert') {
       generatedFields.push({
         key: 'certNumber',
         label: 'Income Certificate Number',
         formValue: application.certificates.incomeCertNumber || '',
-        extractedValue: String(payload.certNumber || application.certificates.incomeCertNumber || ''),
+        extractedValue: String(payload.certNumber || ''),
       });
       generatedFields.push({
         key: 'annualIncome',
         label: 'Family Annual Income',
         formValue: 'Within scholarship ceiling',
-        extractedValue: String(payload.annualIncome || '₹ 1,80,000 / annum'),
+        extractedValue: String(payload.annualIncome || ''),
       });
     } else if (docKey === 'tenthTc' || docKey === 'twelfthTc') {
       const tcNumber = docKey === 'tenthTc' ? application.tenth.tcNumber : application.twelfth.tcNumber;

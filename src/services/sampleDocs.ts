@@ -4,35 +4,82 @@
  */
 
 import { UploadedDocItem, StudentApplication } from '../types/admissions';
+import { generateRawOcrText } from './ocrExtractionService';
 
 export function createSampleVerificationDocs(app: StudentApplication): Record<string, UploadedDocItem> {
   const dateStr = new Date().toISOString().split('T')[0];
 
+  const aadhaarPayload = {
+    name: app.personal.fullName,
+    dob: app.personal.dob,
+    aadhaarNumber: app.certificates.aadhaarNumber || '9845 2210 9812',
+    gender: app.personal.gender || 'Male',
+  };
+
+  const tenthPayload = {
+    studentName: app.personal.fullName,
+    registerNumber: app.tenth.registerNumber || 'TN-SSLC-489201',
+    schoolName: app.tenth.schoolName || 'Stanes Higher Secondary School',
+    totalMarks: app.tenth.totalMarks || 486,
+    marksheetNumber: app.tenth.marksheetNumber || 'SSLC-2024-99812',
+  };
+
+  const tenthTcPayload = {
+    schoolName: app.tenth.schoolName || 'Stanes Higher Secondary School',
+    tcNumber: app.tenth.tcNumber || 'TC-STANES-0841',
+  };
+
+  const twelfthPayload = {
+    studentName: app.personal.fullName,
+    registerNumber: app.twelfth.registerNumber || 'TN-HSC-789104',
+    mathsMarks: app.twelfth.mathsMarks || 95,
+    physicsMarks: app.twelfth.physicsMarks || 92,
+    chemistryMarks: app.twelfth.chemistryMarks || 90,
+  };
+
+  const twelfthTcPayload = {
+    schoolName: app.twelfth.schoolName || 'Stanes Higher Secondary School',
+    tcNumber: app.twelfth.tcNumber || 'TC-STANES-1204',
+  };
+
+  const commPayload = {
+    category: app.specialCategory.community,
+    certNumber: app.certificates.communityCertNumber || 'TN-COMM-2024-99812',
+    issuingAuthority: 'Zonal Deputy Tahsildar, Revenue Department',
+  };
+
+  const incomePayload = {
+    certNumber: app.certificates.incomeCertNumber || 'TN-INC-2024-88912',
+    annualIncome: '₹ 1,80,000 / annum',
+  };
+
+  const birthPayload = {
+    childName: app.personal.fullName,
+    dob: app.personal.dob,
+    registrationNumber: app.certificates.birthCertNumber || 'TN-MC-2007-00918',
+    fatherName: app.personal.fatherName || 'Ramanathan Krishnan',
+    motherName: app.personal.motherName || 'Lakshmi Ramanathan',
+  };
+
   return {
     aadhaarCard: {
       id: `doc-aadh-${Date.now()}`,
-      name: `Aadhaar_${app.personal.fullName.replace(/\s+/g, '_')}.pdf`,
+      name: 'Aadhaar_UIDAI_Document.pdf',
       type: 'application/pdf',
       fileSize: '1.24 MB',
       uploadDate: dateStr,
-      mockDataPayload: {
-        name: app.personal.fullName,
-        dob: app.personal.dob,
-        aadhaarNumber: app.certificates.aadhaarNumber || '9845 2210 9812',
-        gender: app.personal.gender || 'Male',
-      },
+      extractedName: app.personal.fullName,
+      mockDataPayload: aadhaarPayload,
+      ocrExtractedText: generateRawOcrText('aadhaarCard', aadhaarPayload),
     },
     communityCert: {
       id: `doc-comm-${Date.now()}`,
-      name: `Community_Cert_${app.specialCategory.community.replace(/[^a-zA-Z]/g, '')}.pdf`,
+      name: 'Community_Certificate.pdf',
       type: 'application/pdf',
       fileSize: '890 KB',
       uploadDate: dateStr,
-      mockDataPayload: {
-        category: app.specialCategory.community,
-        certNumber: app.certificates.communityCertNumber || 'TN-COMM-2024-99812',
-        issuingAuthority: 'Zonal Deputy Tahsildar, Revenue Department',
-      },
+      mockDataPayload: commPayload,
+      ocrExtractedText: generateRawOcrText('communityCert', commPayload),
     },
     incomeCert: {
       id: `doc-inc-${Date.now()}`,
@@ -40,10 +87,8 @@ export function createSampleVerificationDocs(app: StudentApplication): Record<st
       type: 'application/pdf',
       fileSize: '740 KB',
       uploadDate: dateStr,
-      mockDataPayload: {
-        certNumber: app.certificates.incomeCertNumber || 'TN-INC-2024-88912',
-        annualIncome: '₹ 1,80,000 / annum',
-      },
+      mockDataPayload: incomePayload,
+      ocrExtractedText: generateRawOcrText('incomeCert', incomePayload),
     },
     tenthMarksheet: {
       id: `doc-10th-${Date.now()}`,
@@ -51,13 +96,9 @@ export function createSampleVerificationDocs(app: StudentApplication): Record<st
       type: 'application/pdf',
       fileSize: '1.85 MB',
       uploadDate: dateStr,
-      mockDataPayload: {
-        studentName: app.personal.fullName,
-        registerNumber: app.tenth.registerNumber || 'TN-SSLC-489201',
-        schoolName: app.tenth.schoolName || 'Stanes Higher Secondary School',
-        totalMarks: app.tenth.totalMarks || 486,
-        marksheetNumber: app.tenth.marksheetNumber || 'SSLC-2024-99812',
-      },
+      extractedName: app.personal.fullName,
+      mockDataPayload: tenthPayload,
+      ocrExtractedText: generateRawOcrText('tenthMarksheet', tenthPayload),
     },
     tenthTc: {
       id: `doc-10tc-${Date.now()}`,
@@ -65,10 +106,8 @@ export function createSampleVerificationDocs(app: StudentApplication): Record<st
       type: 'application/pdf',
       fileSize: '920 KB',
       uploadDate: dateStr,
-      mockDataPayload: {
-        schoolName: app.tenth.schoolName || 'Stanes Higher Secondary School',
-        tcNumber: app.tenth.tcNumber || 'TC-STANES-0841',
-      },
+      mockDataPayload: tenthTcPayload,
+      ocrExtractedText: generateRawOcrText('tenthTc', tenthTcPayload),
     },
     twelfthMarksheet: {
       id: `doc-12th-${Date.now()}`,
@@ -76,13 +115,9 @@ export function createSampleVerificationDocs(app: StudentApplication): Record<st
       type: 'application/pdf',
       fileSize: '2.10 MB',
       uploadDate: dateStr,
-      mockDataPayload: {
-        studentName: app.personal.fullName,
-        registerNumber: app.twelfth.registerNumber || 'TN-HSC-789104',
-        mathsMarks: app.twelfth.mathsMarks || 95,
-        physicsMarks: app.twelfth.physicsMarks || 92,
-        chemistryMarks: app.twelfth.chemistryMarks || 90,
-      },
+      extractedName: app.personal.fullName,
+      mockDataPayload: twelfthPayload,
+      ocrExtractedText: generateRawOcrText('twelfthMarksheet', twelfthPayload),
     },
     twelfthTc: {
       id: `doc-12tc-${Date.now()}`,
@@ -90,6 +125,8 @@ export function createSampleVerificationDocs(app: StudentApplication): Record<st
       type: 'application/pdf',
       fileSize: '840 KB',
       uploadDate: dateStr,
+      mockDataPayload: twelfthTcPayload,
+      ocrExtractedText: generateRawOcrText('twelfthTc', twelfthTcPayload),
     },
     birthCert: {
       id: `doc-birth-${Date.now()}`,
@@ -97,6 +134,9 @@ export function createSampleVerificationDocs(app: StudentApplication): Record<st
       type: 'application/pdf',
       fileSize: '650 KB',
       uploadDate: dateStr,
+      extractedName: app.personal.fullName,
+      mockDataPayload: birthPayload,
+      ocrExtractedText: generateRawOcrText('birthCert', birthPayload),
     },
     photo: {
       id: `doc-photo-${Date.now()}`,
@@ -104,6 +144,10 @@ export function createSampleVerificationDocs(app: StudentApplication): Record<st
       type: 'image/jpeg',
       fileSize: '320 KB',
       uploadDate: dateStr,
+      mockDataPayload: {
+        dimensions: '3.5 x 4.5 cm',
+        background: 'Clean White Neutral',
+      },
     },
   };
 }

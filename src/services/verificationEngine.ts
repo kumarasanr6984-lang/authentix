@@ -85,11 +85,11 @@ export function runDocumentVerificationPipeline(
   const maskedSubmitted = maskAadhaar(rawAadhaarNumber);
   const aadhaarPayload = app.documents.aadhaarCard?.mockDataPayload;
 
-  // Extract candidate name from uploaded document via OCR or payload
+  // Extract candidate name strictly from within uploaded document via OCR
   const extAadhaarInfo = extractDocumentName(app.documents.aadhaarCard);
   const extAadhaarName = extAadhaarInfo.extractedName;
-  const extAadhaarDob = (aadhaarPayload?.dob as string) || (aadhaarUploaded ? app.personal.dob : '');
-  const extAadhaarNo = (aadhaarPayload?.aadhaarNumber as string) || rawAadhaarNumber;
+  const extAadhaarDob = (aadhaarPayload?.dob as string) || '';
+  const extAadhaarNo = (aadhaarPayload?.aadhaarNumber as string) || '';
 
   const aadhaarNameField = createNameMatchField(
     app.personal.fullName,
@@ -98,33 +98,40 @@ export function runDocumentVerificationPipeline(
     'Aadhaar Identification Document'
   );
 
+  const isDobMatch = !!extAadhaarDob && app.personal.dob === extAadhaarDob;
+  const isAadhaarMatch =
+    !!extAadhaarNo &&
+    rawAadhaarNumber.slice(-4) === extAadhaarNo.slice(-4) &&
+    rawAadhaarNumber.length >= 12;
+
   const aadhaarFields: ExplainableMatchField[] = [
     aadhaarNameField,
     {
       fieldName: 'Date of Birth',
       submittedValue: app.personal.dob,
-      extractedValue: extAadhaarDob || '—',
-      matchResult: app.personal.dob === extAadhaarDob ? 'MATCH' : 'MISMATCH',
-      confidence: app.personal.dob === extAadhaarDob ? 99 : 30,
-      reason:
-        app.personal.dob === extAadhaarDob
-          ? 'Birth date exactly matches Aadhaar UID record.'
-          : `Entered date (${app.personal.dob}) does not align with document extract (${extAadhaarDob || 'N/A'}).`,
-      recommendedAction:
-        app.personal.dob === extAadhaarDob
-          ? 'Automated pass confirmed.'
-          : 'Verify birth certificate and school transfer certificate.',
+      extractedValue: extAadhaarDob || '— [Not detected in document]',
+      matchResult: isDobMatch ? 'MATCH' : 'MISMATCH',
+      confidence: isDobMatch ? 99 : 30,
+      reason: isDobMatch
+        ? 'Birth date exactly matches Aadhaar UID record.'
+        : extAadhaarDob
+        ? `Entered date (${app.personal.dob}) does not align with document extract (${extAadhaarDob}).`
+        : 'Date of birth was not found in document text content.',
+      recommendedAction: isDobMatch
+        ? 'Automated pass confirmed.'
+        : 'Verify birth certificate and school transfer certificate.',
     },
     {
       fieldName: 'Masked UID / Aadhaar Number',
       submittedValue: maskedSubmitted,
-      extractedValue: maskAadhaar(extAadhaarNo),
-      matchResult:
-        rawAadhaarNumber.slice(-4) === extAadhaarNo.slice(-4) && rawAadhaarNumber.length >= 12
-          ? 'MATCH'
-          : 'MISMATCH',
-      confidence: 98,
-      reason: 'Last 4 digits match masked OCR cryptographic token.',
+      extractedValue: extAadhaarNo ? maskAadhaar(extAadhaarNo) : '— [Not detected in document]',
+      matchResult: isAadhaarMatch ? 'MATCH' : 'MISMATCH',
+      confidence: isAadhaarMatch ? 98 : 30,
+      reason: isAadhaarMatch
+        ? 'Last 4 digits match masked OCR cryptographic token.'
+        : extAadhaarNo
+        ? 'Aadhaar UID does not match submitted number.'
+        : 'Aadhaar 12-digit UID was not detected in document content.',
       recommendedAction: 'UIDAI compliance verified. Masked securely in audit vault.',
     },
   ];
@@ -148,9 +155,9 @@ export function runDocumentVerificationPipeline(
   const tenthPayload = app.documents.tenthMarksheet?.mockDataPayload;
   const extTenthInfo = extractDocumentName(app.documents.tenthMarksheet);
   const extTenthName = extTenthInfo.extractedName;
-  const extTenthRegNo = (tenthPayload?.registerNumber as string) || app.tenth.registerNumber;
-  const extTenthSchool = (tenthPayload?.schoolName as string) || app.tenth.schoolName;
-  const extTenthMarks = Number(tenthPayload?.totalMarks || app.tenth.totalMarks);
+  const extTenthRegNo = (tenthPayload?.registerNumber as string) || '';
+  const extTenthSchool = (tenthPayload?.schoolName as string) || '';
+  const extTenthMarks = tenthPayload?.totalMarks !== undefined ? Number(tenthPayload.totalMarks) : NaN;
 
   const tenthNameField = createNameMatchField(
     app.personal.fullName,
@@ -159,37 +166,49 @@ export function runDocumentVerificationPipeline(
     '10th SSLC Marksheet'
   );
 
-  const tenthSchoolScore = computeSimilarityScore(app.tenth.schoolName, extTenthSchool);
-  const tenthRegMatch = app.tenth.registerNumber.trim().toUpperCase() === extTenthRegNo.trim().toUpperCase();
-  const tenthMarksMatch = Math.abs(app.tenth.totalMarks - extTenthMarks) < 1;
+  const tenthSchoolScore = extTenthSchool ? computeSimilarityScore(app.tenth.schoolName, extTenthSchool) : 0;
+  const tenthRegMatch = !!extTenthRegNo && app.tenth.registerNumber.trim().toUpperCase() === extTenthRegNo.trim().toUpperCase();
+  const tenthMarksMatch = !isNaN(extTenthMarks) && Math.abs(app.tenth.totalMarks - extTenthMarks) < 1;
 
   const tenthFields: ExplainableMatchField[] = [
     tenthNameField,
     {
       fieldName: 'Board Register Number',
       submittedValue: app.tenth.registerNumber,
-      extractedValue: extTenthRegNo,
+      extractedValue: extTenthRegNo || '— [Not detected in document]',
       matchResult: tenthRegMatch ? 'MATCH' : 'MISMATCH',
       confidence: tenthRegMatch ? 100 : 25,
-      reason: tenthRegMatch ? 'Exact alphanumeric match with board ledger.' : 'Register number does not match mark sheet.',
+      reason: tenthRegMatch
+        ? 'Exact alphanumeric match with board ledger.'
+        : extTenthRegNo
+        ? 'Register number does not match mark sheet.'
+        : 'Register number was not found in document content.',
       recommendedAction: tenthRegMatch ? 'Validated.' : 'Check for typographical entry error in register sequence.',
     },
     {
       fieldName: 'School Institution Name',
       submittedValue: app.tenth.schoolName,
-      extractedValue: extTenthSchool,
+      extractedValue: extTenthSchool || '— [Not detected in document]',
       matchResult: tenthSchoolScore >= 85 ? 'MATCH' : tenthSchoolScore >= 60 ? 'PARTIAL' : 'MISMATCH',
       confidence: tenthSchoolScore,
-      reason: tenthSchoolScore >= 85 ? 'Institution name verified.' : 'Entered school name differs from certificate.',
+      reason: tenthSchoolScore >= 85
+        ? 'Institution name verified.'
+        : extTenthSchool
+        ? 'Entered school name differs from certificate.'
+        : 'School name was not found in document content.',
       recommendedAction: tenthSchoolScore >= 85 ? 'Proceed.' : 'Cross-check School EMIS code / affiliation code.',
     },
     {
       fieldName: 'Total Marks (Aggregated)',
       submittedValue: `${app.tenth.totalMarks} / ${app.tenth.maximumMarks} (${app.tenth.percentage}%)`,
-      extractedValue: `${extTenthMarks} / ${app.tenth.maximumMarks}`,
+      extractedValue: !isNaN(extTenthMarks) ? `${extTenthMarks} / ${app.tenth.maximumMarks}` : '— [Not detected in document]',
       matchResult: tenthMarksMatch ? 'MATCH' : 'MISMATCH',
-      confidence: 99,
-      reason: tenthMarksMatch ? 'Declared total marks tally with tabular marksheet column.' : 'Discrepancy in aggregate marks.',
+      confidence: tenthMarksMatch ? 99 : 30,
+      reason: tenthMarksMatch
+        ? 'Declared total marks tally with tabular marksheet column.'
+        : !isNaN(extTenthMarks)
+        ? 'Discrepancy in aggregate marks.'
+        : 'Total marks not detected in document content.',
       recommendedAction: tenthMarksMatch ? 'Passed secondary qualification.' : 'Re-calculate subject totals.',
     },
   ];
@@ -260,15 +279,20 @@ export function runDocumentVerificationPipeline(
   const twelfthPayload = app.documents.twelfthMarksheet?.mockDataPayload;
   const extTwelfthInfo = extractDocumentName(app.documents.twelfthMarksheet);
   const extTwelfthName = extTwelfthInfo.extractedName;
-  const ext12Maths = Number(twelfthPayload?.mathsMarks ?? app.twelfth.mathsMarks);
-  const ext12Phys = Number(twelfthPayload?.physicsMarks ?? app.twelfth.physicsMarks);
-  const ext12Chem = Number(twelfthPayload?.chemistryMarks ?? app.twelfth.chemistryMarks);
-  const ext12RegNo = (twelfthPayload?.registerNumber as string) || app.twelfth.registerNumber;
+  const ext12Maths = twelfthPayload?.mathsMarks !== undefined ? Number(twelfthPayload.mathsMarks) : NaN;
+  const ext12Phys = twelfthPayload?.physicsMarks !== undefined ? Number(twelfthPayload.physicsMarks) : NaN;
+  const ext12Chem = twelfthPayload?.chemistryMarks !== undefined ? Number(twelfthPayload.chemistryMarks) : NaN;
+  const ext12RegNo = (twelfthPayload?.registerNumber as string) || '';
 
   const marks12Match =
+    !isNaN(ext12Maths) &&
+    !isNaN(ext12Phys) &&
+    !isNaN(ext12Chem) &&
     Math.abs(app.twelfth.mathsMarks - ext12Maths) < 1 &&
     Math.abs(app.twelfth.physicsMarks - ext12Phys) < 1 &&
     Math.abs(app.twelfth.chemistryMarks - ext12Chem) < 1;
+
+  const reg12Match = !!ext12RegNo && app.twelfth.registerNumber.trim().toUpperCase() === ext12RegNo.trim().toUpperCase();
 
   const twelfthNameField = createNameMatchField(
     app.personal.fullName,
@@ -282,33 +306,49 @@ export function runDocumentVerificationPipeline(
     {
       fieldName: '12th Register Number',
       submittedValue: app.twelfth.registerNumber,
-      extractedValue: ext12RegNo,
-      matchResult: app.twelfth.registerNumber === ext12RegNo ? 'MATCH' : 'MISMATCH',
-      confidence: 99,
-      reason: app.twelfth.registerNumber === ext12RegNo ? 'Exact register number match.' : 'HSC Register number discrepancy.',
-      recommendedAction: 'Verify HSC provisional ledger.',
+      extractedValue: ext12RegNo || '— [Not detected in document]',
+      matchResult: reg12Match ? 'MATCH' : 'MISMATCH',
+      confidence: reg12Match ? 99 : 25,
+      reason: reg12Match
+        ? 'Exact register number match.'
+        : ext12RegNo
+        ? 'HSC Register number discrepancy.'
+        : 'Register number was not found in document content.',
+      recommendedAction: reg12Match ? 'Verified.' : 'Verify HSC provisional ledger.',
     },
     {
       fieldName: 'Core Subjects (Maths, Physics, Chemistry)',
       submittedValue: `M: ${app.twelfth.mathsMarks}, P: ${app.twelfth.physicsMarks}, C: ${app.twelfth.chemistryMarks}`,
-      extractedValue: `M: ${ext12Maths}, P: ${ext12Phys}, C: ${ext12Chem}`,
+      extractedValue:
+        !isNaN(ext12Maths) && !isNaN(ext12Phys) && !isNaN(ext12Chem)
+          ? `M: ${ext12Maths}, P: ${ext12Phys}, C: ${ext12Chem}`
+          : '— [Marks not detected in document]',
       matchResult: marks12Match ? 'MATCH' : 'MISMATCH',
-      confidence: 98,
-      reason: marks12Match ? 'Core STEM marks accurately matched with certificate.' : 'Marks declared in form do not match scanned document.',
+      confidence: marks12Match ? 98 : 30,
+      reason: marks12Match
+        ? 'Core STEM marks accurately matched with certificate.'
+        : !isNaN(ext12Maths)
+        ? 'Marks declared in form do not match scanned document.'
+        : 'Core marks were not detected in document content.',
       recommendedAction: marks12Match ? 'Eligible for cutoff synthesis.' : 'Update marks to reflect certified grades.',
     },
     (() => {
-      const calculatedExtractedCutoff = Number((ext12Maths + ext12Phys / 2 + ext12Chem / 2).toFixed(2));
-      const cutoffMatch = Math.abs(app.twelfth.engineeringCutoff - calculatedExtractedCutoff) < 0.25;
+      const hasMarks = !isNaN(ext12Maths) && !isNaN(ext12Phys) && !isNaN(ext12Chem);
+      const calculatedExtractedCutoff = hasMarks
+        ? Number((ext12Maths + ext12Phys / 2 + ext12Chem / 2).toFixed(2))
+        : NaN;
+      const cutoffMatch = hasMarks && Math.abs(app.twelfth.engineeringCutoff - calculatedExtractedCutoff) < 0.25;
       return {
         fieldName: 'Engineering Cutoff (Max 200)',
         submittedValue: `${app.twelfth.engineeringCutoff.toFixed(2)} / 200`,
-        extractedValue: `${calculatedExtractedCutoff.toFixed(2)} / 200`,
+        extractedValue: hasMarks ? `${calculatedExtractedCutoff.toFixed(2)} / 200` : '— [Cannot compute: marks missing]',
         matchResult: cutoffMatch ? 'MATCH' : 'MISMATCH',
         confidence: cutoffMatch ? 100 : 35,
         reason: cutoffMatch
           ? `Cutoff formula verified: Maths (${ext12Maths}) + Physics/2 (${(ext12Phys / 2).toFixed(1)}) + Chemistry/2 (${(ext12Chem / 2).toFixed(1)}) = ${calculatedExtractedCutoff.toFixed(2)} / 200.`
-          : `Declared cutoff (${app.twelfth.engineeringCutoff.toFixed(2)}) differs from calculated cutoff (${calculatedExtractedCutoff.toFixed(2)}) derived from OCR document marks.`,
+          : hasMarks
+          ? `Declared cutoff (${app.twelfth.engineeringCutoff.toFixed(2)}) differs from calculated cutoff (${calculatedExtractedCutoff.toFixed(2)}) derived from OCR document marks.`
+          : 'Cannot compute engineering cutoff because subject marks were not found in document content.',
         recommendedAction: cutoffMatch
           ? 'Forward cutoff to seat allocation ranking engine.'
           : 'Update application cutoff to align with certified HSC document marks.',
@@ -335,30 +375,36 @@ export function runDocumentVerificationPipeline(
   // 5. Community Certificate
   const commUploaded = !!app.documents.communityCert;
   const commPayload = app.documents.communityCert?.mockDataPayload;
-  const extCommCategory = (commPayload?.category as string) || app.specialCategory.community;
-  const extCommNo = (commPayload?.certNumber as string) || app.certificates.communityCertNumber;
-  const isCommMatch = app.specialCategory.community === extCommCategory;
-  const isCommNoMatch = (app.certificates.communityCertNumber || '').trim().toUpperCase() === extCommNo.trim().toUpperCase();
+  const extCommCategory = (commPayload?.category as string) || '';
+  const extCommNo = (commPayload?.certNumber as string) || '';
+  const isCommMatch = !!extCommCategory && app.specialCategory.community === extCommCategory;
+  const isCommNoMatch =
+    !app.certificates.communityCertNumber ||
+    (!!extCommNo && (app.certificates.communityCertNumber || '').trim().toUpperCase() === extCommNo.trim().toUpperCase());
 
   const commFields: ExplainableMatchField[] = [
     {
       fieldName: 'Community Classification',
       submittedValue: app.specialCategory.community,
-      extractedValue: extCommCategory,
+      extractedValue: extCommCategory || '— [Not detected in document]',
       matchResult: isCommMatch ? 'MATCH' : 'MISMATCH',
       confidence: isCommMatch ? 99 : 20,
       reason: isCommMatch
         ? `Declared category (${app.specialCategory.community}) matches Revenue Department seal.`
-        : `Applicant declared ${app.specialCategory.community}, but certificate states ${extCommCategory}.`,
+        : extCommCategory
+        ? `Applicant declared ${app.specialCategory.community}, but certificate states ${extCommCategory}.`
+        : 'Community category not detected in document content.',
       recommendedAction: isCommMatch ? 'Reservation category eligible.' : 'Admin verification required prior to quota allocation.',
     },
     {
       fieldName: 'Certificate Number',
       submittedValue: app.certificates.communityCertNumber || 'Not given',
-      extractedValue: extCommNo || 'TN-REV-COMM-8921',
+      extractedValue: extCommNo || '— [Not detected in document]',
       matchResult: isCommNoMatch ? 'MATCH' : 'PARTIAL',
       confidence: 95,
-      reason: 'e-District Tamil Nadu Certificate reference number identified.',
+      reason: isCommNoMatch
+        ? 'e-District Tamil Nadu Certificate reference number identified.'
+        : 'Certificate reference number not matched with document.',
       recommendedAction: 'Checked against e-Sevai portal schema format.',
     },
   ];
@@ -392,23 +438,23 @@ export function runDocumentVerificationPipeline(
   // 6. Income Certificate
   const incomeUploaded = !!app.documents.incomeCert;
   const incomePayload = app.documents.incomeCert?.mockDataPayload;
-  const extIncomeNo = (incomePayload?.certNumber as string) || app.certificates.incomeCertNumber;
-  const extAnnualIncome = (incomePayload?.annualIncome as string) || '₹ 1,80,000 / annum';
+  const extIncomeNo = (incomePayload?.certNumber as string) || '';
+  const extAnnualIncome = (incomePayload?.annualIncome as string) || '';
 
   const isIncomeNoMatch =
     !app.certificates.incomeCertNumber ||
-    (app.certificates.incomeCertNumber.trim().toUpperCase() === (extIncomeNo || '').trim().toUpperCase());
+    (!!extIncomeNo && app.certificates.incomeCertNumber.trim().toUpperCase() === extIncomeNo.trim().toUpperCase());
 
   const incomeFields: ExplainableMatchField[] = [
     {
       fieldName: 'Income Certificate Identifier',
       submittedValue: app.certificates.incomeCertNumber || 'Not provided',
-      extractedValue: extIncomeNo || 'IN-2024-88912',
+      extractedValue: extIncomeNo || '— [Not detected in document]',
       matchResult: isIncomeNoMatch ? 'MATCH' : 'MISMATCH',
       confidence: isIncomeNoMatch ? 97 : 30,
       reason: isIncomeNoMatch
         ? 'Certificate serial number format verified against e-District record.'
-        : `Declared certificate number (${app.certificates.incomeCertNumber}) differs from document serial (${extIncomeNo}).`,
+        : `Declared certificate number (${app.certificates.incomeCertNumber}) differs from document serial (${extIncomeNo || 'Not detected'}).`,
       recommendedAction: isIncomeNoMatch
         ? 'Eligible for Government Post-Matric and First Graduate tuition concession screening.'
         : 'Verify income certificate authenticity on Tamil Nadu e-District portal.',
@@ -416,11 +462,13 @@ export function runDocumentVerificationPipeline(
     {
       fieldName: 'Family Annual Income',
       submittedValue: 'Declared under standard bracket',
-      extractedValue: extAnnualIncome,
-      matchResult: 'MATCH',
-      confidence: 95,
-      reason: 'Extracted annual family income within scholarship ceiling.',
-      recommendedAction: 'Flag for financial aid & tuition fee waiver processing.',
+      extractedValue: extAnnualIncome || '— [Not detected in document]',
+      matchResult: extAnnualIncome ? 'MATCH' : 'PARTIAL',
+      confidence: 96,
+      reason: extAnnualIncome
+        ? 'Income slab certifies compliance for state tuition concession.'
+        : 'Annual income figure was not detected in document content.',
+      recommendedAction: 'Income concession verification confirmed.',
     },
   ];
 

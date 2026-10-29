@@ -4,7 +4,7 @@
  */
 
 import { StudentApplication, UploadedDocItem } from '../types/admissions';
-import { extractDocumentName } from './nameVerificationService';
+import { extractCandidateNameFromText } from './nameVerificationService';
 
 export interface OcrFieldDefinition {
   key: string;
@@ -130,6 +130,13 @@ export function generateRawOcrText(
   lines.push(`SCAN_ENGINE: Authentix OCR Neural Engine v3.4`);
   lines.push(`CONFIDENCE: 98.6% (BBOX ALIGNED)`);
   lines.push('----------------------------------------');
+
+  // Insert explicit candidate name print line if present
+  const cName = payload.name || payload.studentName || payload.childName;
+  if (cName) {
+    lines.push(`Candidate Name: ${cName}`);
+  }
+
   for (const [k, v] of Object.entries(payload)) {
     lines.push(`TOKEN_${k.toUpperCase()}: "${v}"`);
   }
@@ -139,45 +146,320 @@ export function generateRawOcrText(
 }
 
 /**
- * Processes an uploaded file (image or PDF) and synthesizes realistic OCR extracted data.
+ * Parses raw text streams inside PDF buffers directly.
+ * Handles both uncompressed text streams and FlateDecode streams.
+ */
+export async function extractTextFromPdfRaw(data: Uint8Array): Promise<string> {
+  let binaryString = '';
+  // Convert Uint8Array to binary string in chunks to avoid stack overflow
+  const chunkSize = 8192;
+  for (let i = 0; i < data.length; i += chunkSize) {
+    const chunk = data.subarray(i, Math.min(i + chunkSize, data.length));
+    binaryString += String.fromCharCode.apply(null, chunk as unknown as number[]);
+  }
+
+  const texts: string[] = [];
+  const streamRegex = /stream[\r\n]+([\s\S]*?)[\r\n]+endstream/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = streamRegex.exec(binaryString)) !== null) {
+    const rawStream = match[1];
+    let decodedText = '';
+
+    // If running in Node.js environment:
+    const isNode = typeof process !== 'undefined' && !!process.versions?.node;
+    if (isNode) {
+      try {
+        const zlib = await import('zlib');
+        const buffer = Buffer.from(rawStream, 'binary');
+        try {
+          decodedText = zlib.inflateSync(buffer).toString('utf-8');
+        } catch {
+          try {
+            decodedText = zlib.inflateRawSync(buffer).toString('utf-8');
+          } catch {
+            // Not compressed or invalid deflate stream
+          }
+        }
+      } catch {
+        // zlib module unavailable
+      }
+    }
+
+    // If running in browser environment with native DecompressionStream:
+    if (!decodedText && !isNode && typeof DecompressionStream !== 'undefined') {
+      try {
+        const streamBytes = new Uint8Array(rawStream.length);
+        for (let i = 0; i < rawStream.length; i++) {
+          streamBytes[i] = rawStream.charCodeAt(i);
+        }
+        const ds = new DecompressionStream('deflate');
+        const writer = ds.writable.getWriter();
+        await writer.write(streamBytes).catch(() => {});
+        await writer.close().catch(() => {});
+        const response = new Response(ds.readable);
+        decodedText = await response.text().catch(() => '');
+      } catch {
+        // DecompressionStream fallback
+      }
+    }
+
+    if (!decodedText) {
+      decodedText = rawStream;
+    }
+
+    // Extract Tj operators: (text) Tj
+    const tjRegex = /\(([^)]+)\)\s*(?:Tj|'|")/g;
+    let tjMatch: RegExpExecArray | null;
+    while ((tjMatch = tjRegex.exec(decodedText)) !== null) {
+      texts.push(tjMatch[1]);
+    }
+
+    // Extract TJ array operators: [(t) 10 (e)] TJ
+    const tjArrayRegex = /\[([^\]]+)\]\s*TJ/g;
+    let arrayMatch: RegExpExecArray | null;
+    while ((arrayMatch = tjArrayRegex.exec(decodedText)) !== null) {
+      const innerStrings = arrayMatch[1].match(/\(([^)]+)\)/g);
+      if (innerStrings) {
+        texts.push(innerStrings.map((s) => s.slice(1, -1)).join(''));
+      }
+    }
+  }
+
+  // Fallback: search for direct text string patterns inside binary
+  if (texts.length === 0) {
+    const directRegex = /\(([A-Za-z0-9\s:,\.\-\/]{3,100})\)/g;
+    let directMatch: RegExpExecArray | null;
+    while ((directMatch = directRegex.exec(binaryString)) !== null) {
+      texts.push(directMatch[1]);
+    }
+  }
+
+  return texts.join('\n');
+}
+
+/**
+ * Extracts text from PDF using pdfjs-dist
+ */
+async function extractTextFromPdfWithPdfJs(arrayBuffer: ArrayBuffer): Promise<string> {
+  try {
+    const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
+    const loadingTask = pdfjsLib.getDocument({
+      data: new Uint8Array(arrayBuffer),
+      useSystemFonts: true,
+      disableFontFace: true,
+    });
+    const pdf = await loadingTask.promise;
+    const pieces: string[] = [];
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      const pageText = content.items
+        .map((item: unknown) => {
+          if (item && typeof item === 'object' && 'str' in item) {
+            return String((item as { str: string }).str);
+          }
+          return '';
+        })
+        .filter(Boolean)
+        .join(' ');
+      if (pageText.trim()) pieces.push(pageText.trim());
+    }
+    return pieces.join('\n');
+  } catch (err) {
+    console.warn('pdfjs-dist extraction notice:', err);
+    return '';
+  }
+}
+
+/**
+ * Universal PDF Text Stream Extractor (combines raw stream parsing and pdfjs-dist)
+ */
+export async function extractTextFromPdf(buffer: ArrayBuffer): Promise<string> {
+  const bytes = new Uint8Array(buffer);
+
+  // 1. Raw Stream Extraction (instantaneous, zero overhead)
+  try {
+    const rawText = await extractTextFromPdfRaw(bytes);
+    if (rawText && rawText.trim().length > 10) {
+      return rawText.trim();
+    }
+  } catch (err) {
+    console.warn('Raw PDF stream parsing notice:', err);
+  }
+
+  // 2. pdfjs-dist fallback
+  try {
+    const pdfJsText = await extractTextFromPdfWithPdfJs(buffer);
+    if (pdfJsText && pdfJsText.trim().length > 0) {
+      return pdfJsText.trim();
+    }
+  } catch (err) {
+    console.warn('pdfjs-dist fallback notice:', err);
+  }
+
+  return '';
+}
+
+/**
+ * Extracts text from image files (PNG, JPG, JPEG, WEBP) using Tesseract.js OCR
+ */
+export async function extractTextFromImage(fileOrBlob: Blob | File): Promise<string> {
+  try {
+    const { createWorker } = await import('tesseract.js');
+    const worker = await createWorker('eng');
+    const ret = await worker.recognize(fileOrBlob);
+    await worker.terminate();
+    return ret.data.text || '';
+  } catch (err) {
+    console.warn('Image OCR extraction notice:', err);
+    return '';
+  }
+}
+
+/**
+ * Parses structured candidate fields from inside document text.
+ * Strictly uses in-document text lines (never filename).
+ */
+export function parseFieldsFromInDocText(
+  text: string,
+  slotKey: string
+): {
+  extractedName: string | null;
+  fields: Record<string, string | number>;
+} {
+  const fields: Record<string, string | number> = {};
+  if (!text || !text.trim()) {
+    return { extractedName: null, fields };
+  }
+
+  // 1. Candidate Name
+  const candidateName = extractCandidateNameFromText(text, slotKey);
+  if (candidateName) {
+    fields.name = candidateName;
+    fields.studentName = candidateName;
+    fields.childName = candidateName;
+  }
+
+  // 2. Date of Birth
+  const dobMatch = text.match(
+    /(?:DOB|Date\s+of\s+Birth|Birth\s+Date)\s*[:\-]?\s*(\d{2}[\/\-\.]\d{2}[\/\-\.]\d{4}|\d{4}[\/\-\.]\d{2}[\/\-\.]\d{2})/i
+  );
+  if (dobMatch && dobMatch[1]) {
+    let dStr = dobMatch[1].replace(/[\/\.]/g, '-');
+    const parts = dStr.split('-');
+    if (parts[0].length === 2 && parts[2].length === 4) {
+      dStr = `${parts[2]}-${parts[1]}-${parts[0]}`;
+    }
+    fields.dob = dStr;
+  }
+
+  // 3. Register / Roll Number (requires colon or explicit No/Number)
+  const regMatch =
+    text.match(/(?:Register|Registration|Reg|Roll|Hall\s*Ticket)\s*(?:No|Number|#)?\s*[:\-]\s*([A-Za-z0-9\-]+)/i) ||
+    text.match(/(?:Register|Registration|Reg|Roll)\s+(?:No|Number|#)\s+([A-Za-z0-9\-]+)/i);
+  if (regMatch && regMatch[1]) {
+    fields.registerNumber = regMatch[1].trim();
+  }
+
+  // 4. Aadhaar Number (12 digits)
+  const aadhMatch = text.match(/\b(\d{4}\s\d{4}\s\d{4})\b/) || text.match(/\b(\d{12})\b/);
+  if (aadhMatch && aadhMatch[1]) {
+    const rawDigits = aadhMatch[1].replace(/\s+/g, '');
+    fields.aadhaarNumber = `${rawDigits.slice(0, 4)} ${rawDigits.slice(4, 8)} ${rawDigits.slice(8, 12)}`;
+  }
+
+  // 5. Gender
+  const genderMatch = text.match(/\b(Male|Female|Transgender)\b/i);
+  if (genderMatch && genderMatch[1]) {
+    fields.gender = genderMatch[1].charAt(0).toUpperCase() + genderMatch[1].slice(1).toLowerCase();
+  }
+
+  // 6. Marks (Maths, Physics, Chemistry, Total)
+  const mathsMatch = text.match(/(?:Mathematics|Maths|Math)\s*[:\-]?\s*(\d{1,3})/i);
+  if (mathsMatch && mathsMatch[1]) fields.mathsMarks = Number(mathsMatch[1]);
+
+  const physMatch = text.match(/(?:Physics|Phys)\s*[:\-]?\s*(\d{1,3})/i);
+  if (physMatch && physMatch[1]) fields.physicsMarks = Number(physMatch[1]);
+
+  const chemMatch = text.match(/(?:Chemistry|Chem)\s*[:\-]?\s*(\d{1,3})/i);
+  if (chemMatch && chemMatch[1]) fields.chemistryMarks = Number(chemMatch[1]);
+
+  const totalMatch = text.match(/(?:Total\s*Marks|Total|Grand\s*Total)\s*(?:Marks)?\s*[:\-]?\s*(\d{2,4})/i);
+  if (totalMatch && totalMatch[1]) fields.totalMarks = Number(totalMatch[1]);
+
+  // 7. TC Number
+  const tcMatch = text.match(/(?:TC|Transfer\s*Certificate)\s*(?:No|Number)?\s*[:\-]?\s*([A-Za-z0-9\-]+)/i);
+  if (tcMatch && tcMatch[1]) fields.tcNumber = tcMatch[1].trim();
+
+  // 8. Community / Category
+  const commMatch = text.match(
+    /(?:Community|Category|Caste)\s*[:\-]?\s*(OC|BC|MBC\s*\/\s*DNC|MBC|SC|ST|BCM|DNC|General)/i
+  );
+  if (commMatch && commMatch[1]) fields.category = commMatch[1].trim().toUpperCase();
+
+  // 9. Certificate Numbers (Community / Income)
+  const certMatch = text.match(/(?:Cert|Certificate)\s*(?:No|Number|Ref)?\s*[:\-]?\s*([A-Za-z0-9\-]+)/i);
+  if (certMatch && certMatch[1]) fields.certNumber = certMatch[1].trim();
+
+  // 10. School / Institution
+  const schoolMatch = text.match(/(?:School|Institution|College)\s*[:\-]?\s*([A-Za-z0-9\s,\.\-]+?)(?=\n|\r|$)/i);
+  if (schoolMatch && schoolMatch[1] && schoolMatch[1].trim().length > 3) {
+    fields.schoolName = schoolMatch[1].trim();
+  }
+
+  return {
+    extractedName: candidateName,
+    fields,
+  };
+}
+
+/**
+ * Processes an uploaded file (image or PDF) by extracting text strictly from INSIDE the document bytes.
+ * NOTE: Filename extraction is deliberately eliminated.
  */
 export async function processUploadedFileWithOcr(
   file: File,
   slotKey: string,
-  app: StudentApplication
+  _app: StudentApplication
 ): Promise<UploadedDocItem> {
-  const isImg = file.type.startsWith('image/');
+  const isImg = file.type.startsWith('image/') || /\.(png|jpe?g|webp|bmp)$/i.test(file.name);
+  const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
   const previewUrl = isImg ? URL.createObjectURL(file) : undefined;
-  const filenameExtracted = extractDocumentName({ name: file.name });
 
-  // Generate structured OCR payload for this document type
-  const payload = createDefaultOcrPayloadForDoc(slotKey, app, false);
+  let inDocRawText = '';
 
-  // If filename contained a specific name, use it in the OCR payload
-  if (filenameExtracted.extractedName) {
-    if ('name' in payload) payload.name = filenameExtracted.extractedName;
-    if ('studentName' in payload) payload.studentName = filenameExtracted.extractedName;
-    if ('childName' in payload) payload.childName = filenameExtracted.extractedName;
+  try {
+    if (isPdf) {
+      const arrayBuffer = await file.arrayBuffer();
+      inDocRawText = await extractTextFromPdf(arrayBuffer);
+    } else if (isImg) {
+      inDocRawText = await extractTextFromImage(file);
+    } else {
+      // Plain text or CSV or other formats
+      inDocRawText = await file.text();
+    }
+  } catch (err) {
+    console.warn(`Could not extract text from file ${file.name}:`, err);
   }
 
-  const rawOcr = generateRawOcrText(slotKey, payload);
+  // Parse in-document text (NEVER extract candidate name from file.name)
+  const parsed = parseFieldsFromInDocText(inDocRawText, slotKey);
 
-  const docName =
-    (payload.name as string) ||
-    (payload.studentName as string) ||
-    (payload.childName as string) ||
-    filenameExtracted.extractedName ||
-    app.personal.fullName;
+  // If inDocRawText is empty (e.g. blank scan or unrecognized binary)
+  const rawOcr = inDocRawText.trim()
+    ? inDocRawText.trim()
+    : `=== DOCUMENT CONTENT SCANNER ===\nFILE: ${file.name}\nSTATUS: No text detected inside document.\nNOTE: Ensure the document contains clear printed text.`;
 
   return {
     id: `doc-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
     name: file.name,
-    type: file.type || 'application/pdf',
+    type: file.type || (isPdf ? 'application/pdf' : 'application/octet-stream'),
     fileSize: `${(file.size / (1024 * 1024)).toFixed(2)} MB`,
     uploadDate: new Date().toISOString().split('T')[0],
     previewUrl,
-    extractedName: docName,
-    mockDataPayload: payload,
+    extractedName: parsed.extractedName || undefined,
+    mockDataPayload: parsed.fields,
     ocrExtractedText: rawOcr,
   };
 }
@@ -202,7 +484,7 @@ export function createDiscrepantSampleVerificationDocs(
   return {
     aadhaarCard: {
       id: `doc-aadh-disc-${Date.now()}`,
-      name: 'Aadhaar_Karthick_Ramanathan_Discrepant.pdf',
+      name: 'Aadhaar_Identification.pdf',
       type: 'application/pdf',
       fileSize: '1.24 MB',
       uploadDate: dateStr,
@@ -212,7 +494,7 @@ export function createDiscrepantSampleVerificationDocs(
     },
     tenthMarksheet: {
       id: `doc-10th-disc-${Date.now()}`,
-      name: '10th_Standard_SSLC_Marksheet_Discrepant.pdf',
+      name: '10th_Standard_SSLC_Marksheet.pdf',
       type: 'application/pdf',
       fileSize: '1.85 MB',
       uploadDate: dateStr,
@@ -231,7 +513,7 @@ export function createDiscrepantSampleVerificationDocs(
     },
     twelfthMarksheet: {
       id: `doc-12th-disc-${Date.now()}`,
-      name: '12th_HSC_Marksheet_Discrepant.pdf',
+      name: '12th_HSC_Marksheet.pdf',
       type: 'application/pdf',
       fileSize: '2.10 MB',
       uploadDate: dateStr,
@@ -250,7 +532,7 @@ export function createDiscrepantSampleVerificationDocs(
     },
     communityCert: {
       id: `doc-comm-disc-${Date.now()}`,
-      name: 'Community_Certificate_MBC_Discrepant.pdf',
+      name: 'Community_Certificate.pdf',
       type: 'application/pdf',
       fileSize: '890 KB',
       uploadDate: dateStr,

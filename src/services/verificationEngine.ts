@@ -221,10 +221,14 @@ export function runDocumentVerificationPipeline(
       fieldName: 'Transfer Certificate Number',
       submittedValue: app.tenth.tcNumber || 'Not provided',
       extractedValue: extTcNo || 'TC/2024/098',
-      matchResult: tcNoMatch ? 'MATCH' : 'PARTIAL',
-      confidence: tcNoMatch ? 98 : 75,
-      reason: tcNoMatch ? 'TC Serial number matches institutional register.' : 'Minor alphanumeric format variance.',
-      recommendedAction: 'Record archived in institutional ledger.',
+      matchResult: tcNoMatch ? 'MATCH' : 'MISMATCH',
+      confidence: tcNoMatch ? 98 : 30,
+      reason: tcNoMatch
+        ? 'TC Serial number matches institutional register.'
+        : `Declared TC number (${app.tenth.tcNumber || 'N/A'}) differs from document serial (${extTcNo}).`,
+      recommendedAction: tcNoMatch
+        ? 'Record archived in institutional ledger.'
+        : 'Cross-check physical school leaving register.',
     },
     {
       fieldName: 'Relieving School Name',
@@ -293,15 +297,23 @@ export function runDocumentVerificationPipeline(
       reason: marks12Match ? 'Core STEM marks accurately matched with certificate.' : 'Marks declared in form do not match scanned document.',
       recommendedAction: marks12Match ? 'Eligible for cutoff synthesis.' : 'Update marks to reflect certified grades.',
     },
-    {
-      fieldName: 'Engineering Cutoff (Max 200)',
-      submittedValue: `${app.twelfth.engineeringCutoff.toFixed(2)} / 200`,
-      extractedValue: `${(ext12Maths / 2 + ext12Phys / 4 + ext12Chem / 4).toFixed(2)} / 200`,
-      matchResult: 'MATCH',
-      confidence: 100,
-      reason: 'Standard formula applied: (Maths / 2) + (Physics / 4) + (Chemistry / 4).',
-      recommendedAction: 'Forward cutoff to seat allocation ranking engine.',
-    },
+    (() => {
+      const calculatedExtractedCutoff = Number((ext12Maths + ext12Phys / 2 + ext12Chem / 2).toFixed(2));
+      const cutoffMatch = Math.abs(app.twelfth.engineeringCutoff - calculatedExtractedCutoff) < 0.25;
+      return {
+        fieldName: 'Engineering Cutoff (Max 200)',
+        submittedValue: `${app.twelfth.engineeringCutoff.toFixed(2)} / 200`,
+        extractedValue: `${calculatedExtractedCutoff.toFixed(2)} / 200`,
+        matchResult: cutoffMatch ? 'MATCH' : 'MISMATCH',
+        confidence: cutoffMatch ? 100 : 35,
+        reason: cutoffMatch
+          ? `Cutoff formula verified: Maths (${ext12Maths}) + Physics/2 (${(ext12Phys / 2).toFixed(1)}) + Chemistry/2 (${(ext12Chem / 2).toFixed(1)}) = ${calculatedExtractedCutoff.toFixed(2)} / 200.`
+          : `Declared cutoff (${app.twelfth.engineeringCutoff.toFixed(2)}) differs from calculated cutoff (${calculatedExtractedCutoff.toFixed(2)}) derived from OCR document marks.`,
+        recommendedAction: cutoffMatch
+          ? 'Forward cutoff to seat allocation ranking engine.'
+          : 'Update application cutoff to align with certified HSC document marks.',
+      } as ExplainableMatchField;
+    })(),
   ];
 
   const twelfthStatusInfo = determineDocumentStatus(twelfthFields, twelfthUploaded, app.twelfth.isExpectedMarks);
@@ -383,15 +395,23 @@ export function runDocumentVerificationPipeline(
   const extIncomeNo = (incomePayload?.certNumber as string) || app.certificates.incomeCertNumber;
   const extAnnualIncome = (incomePayload?.annualIncome as string) || '₹ 1,80,000 / annum';
 
+  const isIncomeNoMatch =
+    !app.certificates.incomeCertNumber ||
+    (app.certificates.incomeCertNumber.trim().toUpperCase() === (extIncomeNo || '').trim().toUpperCase());
+
   const incomeFields: ExplainableMatchField[] = [
     {
       fieldName: 'Income Certificate Identifier',
-      submittedValue: app.certificates.incomeCertNumber || 'IN-2024-88912',
+      submittedValue: app.certificates.incomeCertNumber || 'Not provided',
       extractedValue: extIncomeNo || 'IN-2024-88912',
-      matchResult: 'MATCH',
-      confidence: 97,
-      reason: 'Certificate serial number format verified.',
-      recommendedAction: 'Eligible for Government Post-Matric and First Graduate tuition concession screening.',
+      matchResult: isIncomeNoMatch ? 'MATCH' : 'MISMATCH',
+      confidence: isIncomeNoMatch ? 97 : 30,
+      reason: isIncomeNoMatch
+        ? 'Certificate serial number format verified against e-District record.'
+        : `Declared certificate number (${app.certificates.incomeCertNumber}) differs from document serial (${extIncomeNo}).`,
+      recommendedAction: isIncomeNoMatch
+        ? 'Eligible for Government Post-Matric and First Graduate tuition concession screening.'
+        : 'Verify income certificate authenticity on Tamil Nadu e-District portal.',
     },
     {
       fieldName: 'Family Annual Income',

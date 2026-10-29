@@ -20,12 +20,19 @@ import {
   X,
   Edit2,
   Check,
+  ScanText,
+  AlertTriangle,
 } from 'lucide-react';
 import { StudentApplication, UploadedDocItem } from '../types/admissions';
 import { createSampleVerificationDocs } from '../services/sampleDocs';
 import { useThemeLanguage } from '../context/ThemeLanguageContext.tsx';
 import { extractDocumentName, verifyStudentName } from '../services/nameVerificationService';
 import { NameVerificationModal } from './NameVerificationModal';
+import {
+  processUploadedFileWithOcr,
+  createDiscrepantSampleVerificationDocs,
+} from '../services/ocrExtractionService';
+import { OcrDocumentInspectorModal } from './OcrDocumentInspectorModal';
 
 interface DocumentUploadProps {
   application: StudentApplication;
@@ -60,9 +67,11 @@ export const DocumentUpload: React.FC<DocumentUploadProps> = ({
   );
   const [errorMessage, setErrorMessage] = useState('');
   const [sampleSuccessToast, setSampleSuccessToast] = useState(false);
+  const [discrepancyToast, setDiscrepancyToast] = useState(false);
   const [isNameModalOpen, setIsNameModalOpen] = useState(false);
   const [editingDocKey, setEditingDocKey] = useState<string | null>(null);
   const [editingDocValue, setEditingDocValue] = useState<string>('');
+  const [inspectingDocKey, setInspectingDocKey] = useState<string | null>(null);
 
   const docSlots: DocSlotConfig[] = [
     {
@@ -152,7 +161,7 @@ export const DocumentUpload: React.FC<DocumentUploadProps> = ({
     },
   ];
 
-  const handleFileUpload = (key: string, file: File) => {
+  const handleFileUpload = async (key: string, file: File) => {
     setErrorMessage('');
     if (file.size > 10 * 1024 * 1024) {
       setErrorMessage(`File "${file.name}" exceeds the 10 MB limit.`);
@@ -160,46 +169,65 @@ export const DocumentUpload: React.FC<DocumentUploadProps> = ({
     }
 
     // Simulate upload progress
-    setUploadProgress((prev) => ({ ...prev, [key]: 10 }));
+    setUploadProgress((prev) => ({ ...prev, [key]: 15 }));
     const interval = setInterval(() => {
       setUploadProgress((prev) => {
-        const current = prev[key] || 10;
-        if (current >= 100) {
+        const current = prev[key] || 15;
+        if (current >= 90) {
           clearInterval(interval);
           return prev;
         }
-        return { ...prev, [key]: current + 30 };
+        return { ...prev, [key]: current + 25 };
       });
-    }, 80);
+    }, 70);
 
-    setTimeout(() => {
-      const isImg = file.type.startsWith('image/');
-      const previewUrl = isImg ? URL.createObjectURL(file) : undefined;
-      const extractedInfo = extractDocumentName({ name: file.name });
+    try {
+      const processedDoc = await processUploadedFileWithOcr(file, key, application);
+      clearInterval(interval);
+      setUploadProgress((prev) => ({ ...prev, [key]: 100 }));
 
-      const newDoc: UploadedDocItem = {
-        id: `doc-${Date.now()}`,
-        name: file.name,
-        type: file.type || 'application/pdf',
-        fileSize: `${(file.size / (1024 * 1024)).toFixed(2)} MB`,
-        uploadDate: new Date().toISOString().split('T')[0],
-        previewUrl,
-        extractedName: extractedInfo.extractedName || undefined,
-      };
-
-      const updated = { ...docs, [key]: newDoc };
-      setDocs(updated);
-      onUpdateDocs(updated);
+      setTimeout(() => {
+        const updated = { ...docs, [key]: processedDoc };
+        setDocs(updated);
+        onUpdateDocs(updated);
+        setUploadProgress((prev) => {
+          const clone = { ...prev };
+          delete clone[key];
+          return clone;
+        });
+      }, 200);
+    } catch {
+      clearInterval(interval);
+      setErrorMessage(`Error running OCR on "${file.name}".`);
       setUploadProgress((prev) => {
         const clone = { ...prev };
         delete clone[key];
         return clone;
       });
-    }, 350);
+    }
   };
 
   const handleRemove = (key: string) => {
     const updated = { ...docs, [key]: null };
+    setDocs(updated);
+    onUpdateDocs(updated);
+  };
+
+  const handleSaveOcrPayload = (
+    slotKey: string,
+    newPayload: Record<string, string | number>,
+    newDocName?: string
+  ) => {
+    const target = docs[slotKey];
+    if (!target) return;
+    const updated = {
+      ...docs,
+      [slotKey]: {
+        ...target,
+        mockDataPayload: newPayload,
+        extractedName: newDocName || target.extractedName,
+      },
+    };
     setDocs(updated);
     onUpdateDocs(updated);
   };
@@ -211,6 +239,15 @@ export const DocumentUpload: React.FC<DocumentUploadProps> = ({
     setErrorMessage('');
     setSampleSuccessToast(true);
     setTimeout(() => setSampleSuccessToast(false), 3500);
+  };
+
+  const handleLoadDiscrepantDocuments = () => {
+    const discDocs = createDiscrepantSampleVerificationDocs(application);
+    setDocs(discDocs);
+    onUpdateDocs(discDocs);
+    setErrorMessage('');
+    setDiscrepancyToast(true);
+    setTimeout(() => setDiscrepancyToast(false), 4000);
   };
 
   const handleLoadNameTestScenario = (
@@ -326,30 +363,91 @@ export const DocumentUpload: React.FC<DocumentUploadProps> = ({
             </p>
           </div>
 
-          <div className="flex items-center gap-3">
-            {/* Quick Demo Preload Button */}
+          <div className="flex flex-wrap items-center gap-2.5">
+            {/* Quick Demo Preload Button - Matching */}
             <button
               type="button"
               onClick={handleLoadSampleDocuments}
-              className="flex items-center gap-2 px-4 py-2.5 text-xs font-bold text-amber-900 dark:text-amber-200 bg-amber-100 hover:bg-amber-200 dark:bg-amber-950/60 dark:hover:bg-amber-900/60 border border-amber-300 dark:border-amber-700/60 rounded-xl transition-all shadow-sm cursor-pointer hover:shadow-md active:scale-95"
+              className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-emerald-900 dark:text-emerald-200 bg-emerald-100 hover:bg-emerald-200 dark:bg-emerald-950/70 dark:hover:bg-emerald-900/70 border border-emerald-300 dark:border-emerald-700/60 rounded-xl transition-all shadow-xs cursor-pointer hover:shadow-sm active:scale-95"
+              title="Loads certified sample documents where all details match the form"
             >
-              <Sparkles className="w-4 h-4 text-amber-600 dark:text-amber-400 animate-pulse" />
-              <span>{t('loadDemoSamples')}</span>
+              <Sparkles className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+              <span>Load Matching Documents</span>
+            </button>
+
+            {/* Quick Demo Preload Button - Discrepancies */}
+            <button
+              type="button"
+              onClick={handleLoadDiscrepantDocuments}
+              className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-amber-900 dark:text-amber-200 bg-amber-100 hover:bg-amber-200 dark:bg-amber-950/70 dark:hover:bg-amber-900/70 border border-amber-300 dark:border-amber-700/60 rounded-xl transition-all shadow-xs cursor-pointer hover:shadow-sm active:scale-95"
+              title="Loads sample documents with deliberate discrepancies to test mismatch detection"
+            >
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+              <span>Test Discrepant Documents</span>
             </button>
           </div>
         </div>
 
-
+        {/* Feature Banner: Document Verification Using OCR */}
+        <div className="bg-gradient-to-r from-blue-50 via-indigo-50/70 to-sky-50 dark:from-slate-900 dark:via-blue-950/40 dark:to-indigo-950/30 border border-blue-200/80 dark:border-blue-900/60 rounded-2xl p-5 shadow-xs space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-start gap-3">
+              <div className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-sm mt-0.5">
+                <ScanText className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                    Document Verification Using OCR
+                  </h3>
+                  <span className="text-[10px] font-mono font-bold uppercase tracking-wider bg-blue-100 text-blue-800 dark:bg-blue-900/70 dark:text-blue-300 px-2 py-0.5 rounded-full">
+                    Active
+                  </span>
+                </div>
+                <p className="text-xs text-slate-600 dark:text-slate-300 mt-1 leading-relaxed">
+                  The system extracts information from uploaded documents using Optical Character Recognition (OCR), compares extracted details with information entered in the application form, and verifies whether the details match or differ.
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2.5 border-t border-blue-100 dark:border-blue-900/50 text-[11px]">
+            <div className="flex items-center gap-2 text-slate-700 dark:text-slate-300 font-medium">
+              <div className="w-2 h-2 rounded-full bg-blue-600 shrink-0" />
+              <span>1. Extract OCR Tokens &amp; Metadata</span>
+            </div>
+            <div className="flex items-center gap-2 text-slate-700 dark:text-slate-300 font-medium">
+              <div className="w-2 h-2 rounded-full bg-amber-500 shrink-0" />
+              <span>2. Field-by-Field Exact &amp; Fuzzy Comparison</span>
+            </div>
+            <div className="flex items-center gap-2 text-slate-700 dark:text-slate-300 font-medium">
+              <div className="w-2 h-2 rounded-full bg-emerald-600 shrink-0" />
+              <span>3. Verify &amp; Report Matches / Differences</span>
+            </div>
+          </div>
+        </div>
 
         {/* Sample Documents Success Toast */}
         {sampleSuccessToast && (
           <div className="p-4 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-300 dark:border-emerald-700/60 text-emerald-900 dark:text-emerald-200 rounded-xl text-xs font-semibold flex items-center justify-between gap-2 shadow-sm animate-in fade-in">
             <div className="flex items-center gap-2.5">
               <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-              <span>Sample verification documents successfully attached for all categories!</span>
+              <span>100% Matching verification documents loaded! All OCR extracted fields correspond to form entries.</span>
             </div>
             <span className="text-[11px] font-mono font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-900/60 px-2.5 py-1 rounded-md">
               ✓ Ready to Verify
+            </span>
+          </div>
+        )}
+
+        {/* Discrepancy Scenario Loaded Toast */}
+        {discrepancyToast && (
+          <div className="p-4 bg-amber-50 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-700/60 text-amber-900 dark:text-amber-200 rounded-xl text-xs font-semibold flex items-center justify-between gap-2 shadow-sm animate-in fade-in">
+            <div className="flex items-center gap-2.5">
+              <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+              <span>Discrepant scenario loaded! Intentional differences in Name, DOB, 10th &amp; 12th marks, and Category attached. Run verification to see OCR flag differences!</span>
+            </div>
+            <span className="text-[11px] font-mono font-bold text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/60 px-2.5 py-1 rounded-md">
+              ⚠ Test Discrepancies
             </span>
           </div>
         )}
@@ -527,6 +625,16 @@ export const DocumentUpload: React.FC<DocumentUploadProps> = ({
                       <>
                         <button
                           type="button"
+                          onClick={() => setInspectingDocKey(slot.key)}
+                          className="px-2.5 py-1 text-xs font-semibold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
+                          title="Inspect and edit OCR extracted field values"
+                        >
+                          <ScanText className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                          <span>OCR Data</span>
+                        </button>
+
+                        <button
+                          type="button"
                           onClick={() => setPreviewDoc({ title: slot.title, doc: uploaded })}
                           className="px-2.5 py-1 text-xs font-semibold text-blue-700 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/60 hover:bg-blue-100 dark:hover:bg-blue-900/60 rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
                         >
@@ -689,6 +797,19 @@ export const DocumentUpload: React.FC<DocumentUploadProps> = ({
           'Kumar R'
         }
       />
+
+      {/* Field-by-Field OCR Document Inspector & Editor Modal */}
+      {inspectingDocKey && docs[inspectingDocKey] && (
+        <OcrDocumentInspectorModal
+          isOpen={true}
+          onClose={() => setInspectingDocKey(null)}
+          docKey={inspectingDocKey}
+          docTitle={docSlots.find((s) => s.key === inspectingDocKey)?.title || inspectingDocKey}
+          doc={docs[inspectingDocKey]!}
+          application={application}
+          onSavePayload={handleSaveOcrPayload}
+        />
+      )}
     </div>
   );
 };
